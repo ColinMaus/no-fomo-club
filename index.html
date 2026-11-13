@@ -23,10 +23,10 @@
   --st:env(safe-area-inset-top,0px); --sb:env(safe-area-inset-bottom,0px);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;overscroll-behavior:none}
+html,body{margin:0;height:var(--appH,100%);overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;overscroll-behavior:none}
 body{display:flex;justify-content:center}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
-.app{width:100%;max-width:480px;height:100dvh;display:flex;flex-direction:column;position:relative;overflow:hidden;padding-top:calc(var(--st) + 10px)}
+.app{width:100%;max-width:480px;height:var(--appH,100dvh);display:flex;flex-direction:column;position:relative;overflow:hidden;padding-top:calc(var(--st) + 10px)}
 h1,h2,h3,.disp{font-family:"Bricolage Grotesque",sans-serif;letter-spacing:-.02em;margin:0}
 
 [data-theme=dark]{--bg:#12372A;--ink:#F4EEE2;--muted:#A3B5A9;--card:#1A4434;--line:rgba(244,238,226,.13);--inv:#12372A;--track:rgba(244,238,226,.28);--rfill:#F4EEE2;--soft:rgba(201,165,92,.10);--softb:#C9A55C;--msg:#1F5A3F;color-scheme:dark}
@@ -425,6 +425,21 @@ a.btn{text-decoration:none;display:inline-block}
 // Leer = Vorschau-Modus mit simulierter Freigabe.
 const API_URL = "https://script.google.com/macros/s/AKfycbzvGipkqjj0C7hztrBK5sZRRDp5u0SRWU9e5Gh0E6q7X6wy4BMRHWZhSlqHszpm670tVw/exec";
 const LIVE = !!API_URL;
+
+/* ---------- iPhone-Home-Bildschirm: volle Höhe erzwingen ----------
+   iOS meldet im Web-App-Modus manchmal eine zu kleine Höhe (als wäre unten noch
+   die Safari-Leiste). Dann nehmen wir die echte Bildschirmhöhe. */
+function fitStandalone(){
+  const sa=navigator.standalone||matchMedia("(display-mode: standalone)").matches;
+  if(!sa){document.documentElement.style.removeProperty("--appH");return}
+  const pr=document.createElement("div");pr.style.cssText="position:absolute;visibility:hidden;padding-top:env(safe-area-inset-top)";document.body.appendChild(pr);
+  const st=parseFloat(getComputedStyle(pr).paddingTop)||0;pr.remove();
+  const full=innerHeight>innerWidth?screen.height:screen.width,gap=full-innerHeight;
+  // Nur korrigieren, wenn die Seite hinter der Statusleiste beginnt (st>0) und unten ein Stück fehlt
+  if(st>0&&gap>0&&gap<160)document.documentElement.style.setProperty("--appH",full+"px");
+  else document.documentElement.style.removeProperty("--appH");
+}
+fitStandalone();addEventListener("resize",fitStandalone);addEventListener("orientationchange",()=>setTimeout(fitStandalone,300));
 
 /* ---------- Basisdaten ---------- */
 const HOME = {name:"Idar-Oberstein", lat:49.7116, lng:7.3126};
