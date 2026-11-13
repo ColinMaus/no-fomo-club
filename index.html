@@ -647,6 +647,7 @@ function load(){try{return JSON.parse(localStorage.getItem("losziehn")||"null")}
 function save(){try{localStorage.setItem("losziehn",JSON.stringify(S))}catch(e){}}
 S = Object.assign({center:HOME,day:todayISO(),setting:"any",vibes:[],radius:100,decisions:{},prefs:{},picks:{},events:[],people:[],extra:[],mapData:{},weather:null,hist:[]}, load()||{});
 if(S.day<todayISO()) S.day=todayISO();
+S.radius=20; // App startet immer mit 20 km Umkreis
 if(!LIVE&&!S.pvMainz){S.pvMainz=1;S.center=MAINZ;S.weather=null;try{localStorage.setItem("losziehn",JSON.stringify(S))}catch(e){}} // Vorschau: einmalig Mainz
 
 const ACT = ()=>{const all=[...SEED,...S.extra];const m=new Map();all.forEach(a=>{a.id=a.id||slug(a.title+"-"+(a.place||""));if(!m.has(a.id))m.set(a.id,a)});return m};
@@ -759,7 +760,7 @@ function renderDeck(){
       <p>${osmLoading?"Suche gerade Orte in der Nähe …":sample?"Hol dir frische Ideen, passend zu deinem Tag und deinen Filtern.":"Lade Orte in der Nähe nach, lockere die Filter oder wähle einen anderen Tag."}</p>
       <div class="row" style="justify-content:center">${sample?`<button class="btn coral" id="moreBtn">✨ Neue Ideen holen</button>`:`<button class="btn coral" id="osmBtn">📍 Orte in der Nähe laden</button>`}
       <button class="btn ghost" id="resetF">Filter zurücksetzen</button></div></div>`;
-    $("#resetF").onclick=()=>{S.vibes=[];S.setting="any";S.radius=100;save();renderFilters();renderDeck()};
+    $("#resetF").onclick=()=>{S.vibes=[];S.setting="any";S.radius=20;save();renderFilters();renderDeck()};
     const mb=$("#moreBtn");mb&&(mb.onclick=fetchIdeas);
     const ob=$("#osmBtn");ob&&(ob.onclick=()=>{toast("🔎 Suche Orte in der Nähe …");loadOSM(true)});
     return;
@@ -873,10 +874,12 @@ const OSM_CAT={
   park:{e:"🌳",v:["chill","nature"],s:"out",d:"1–2 h",p:"kostenlos",t:"Park zum Spazieren und Durchatmen."},
   nature_reserve:{e:"🌲",v:["nature","sport"],s:"out",d:"2 h",p:"kostenlos",t:"Naturschutzgebiet für eine Runde draußen."},
   dog_park:{e:"🐕",v:["dog","chill"],s:"out",d:"45 min",p:"kostenlos",t:"Hundewiese – hier darf dein Hund frei toben."},
-  walk:{e:"🐾",v:["dog","nature","sport"],s:"out",d:"1–2 h",p:"kostenlos",t:"Rundweg in der Nähe – schöne Gassi-Runde."}
+  walk:{e:"🐾",v:["dog","nature","sport"],s:"out",d:"1–2 h",p:"kostenlos",t:"Rundweg in der Nähe – schöne Gassi-Runde."},
+  path:{e:"🐕",v:["dog","nature","chill"],s:"out",d:"30–60 min",p:"kostenlos",t:"Benannter Spazierweg in der Nähe – kurze Gassi-Runde zwischendurch."},
+  ice_cream:{e:"🍦",v:["cafe","date"],s:"in",d:"30 min",p:"€",t:"Eiscafé – eine Kugel geht immer."}
 };
 function osmKind(t){
-  if(t.amenity==="bar")return"bar";if(t.amenity==="pub")return"pub";if(t.amenity==="cafe")return"cafe";
+  if(t.amenity==="bar")return"bar";if(t.amenity==="pub")return"pub";if(t.amenity==="cafe")return"cafe";if(t.amenity==="ice_cream")return"ice_cream";
   if(t.shop==="second_hand"||t.shop==="vintage")return"second_hand";
   if(t.amenity==="cinema")return"cinema";if(t.amenity==="theatre")return"theatre";if(t.amenity==="marketplace")return"marketplace";
   if(t.amenity==="public_bath"||t.leisure==="water_park"||t.leisure==="sauna")return"bath";
@@ -886,15 +889,15 @@ function osmKind(t){
   if(t.tourism==="museum")return"museum";if(t.tourism==="gallery")return"gallery";if(t.tourism==="zoo")return"zoo";
   if(t.tourism==="theme_park")return"theme_park";if(t.tourism==="viewpoint")return"viewpoint";
   if(t.historic==="castle")return"castle";if(t.historic==="ruins")return"ruins";
-  if(t.leisure==="dog_park")return"dog_park";if(t.route==="hiking")return"walk";
+  if(t.leisure==="dog_park")return"dog_park";if(t.route==="hiking")return"walk";if(t.highway&&/^(footway|path|track)$/.test(t.highway))return"path";
   if(t.leisure==="park")return"park";if(t.leisure==="nature_reserve")return"nature_reserve";
   if(t.tourism==="attraction"||t.historic==="monument")return"attraction";
   return null;
 }
 function osmQuery(c,R){
-  const r1=Math.round(Math.min(R,25)*1000),r2=Math.round(Math.min(R,60)*1000),aw=`(around:${Math.round(Math.min(R,12)*1000)},${c.lat},${c.lng})`,a1=`(around:${r1},${c.lat},${c.lng})`,a2=`(around:${r2},${c.lat},${c.lng})`;
+  const r1=Math.round(Math.min(R,25)*1000),r2=Math.round(Math.min(R,60)*1000),aw=`(around:${Math.round(Math.min(R,20)*1000)},${c.lat},${c.lng})`,a1=`(around:${r1},${c.lat},${c.lng})`,a2=`(around:${r2},${c.lat},${c.lng})`;
   return `[out:json][timeout:25];(
-nwr["amenity"~"^(bar|pub|cafe)$"]["name"]["opening_hours"]${a1};
+nwr["amenity"~"^(bar|pub|cafe|ice_cream)$"]["name"]${a1};
 nwr["shop"~"^(second_hand|vintage)$"]["name"]${a1};
 nwr["amenity"~"^(cinema|theatre|marketplace|public_bath)$"]["name"]${a1};
 nwr["leisure"~"^(escape_game|bowling_alley|miniature_golf|ice_rink|water_park|sauna)$"]["name"]${a1};
@@ -906,11 +909,13 @@ nwr["leisure"~"^(park|nature_reserve)$"]["name"]["wikidata"]${a2};
 nwr["leisure"="dog_park"]${a1};
 nwr["leisure"="park"]["name"]${aw};
 relation["route"="hiking"]["name"]${aw};
-);out center tags 700;`;
+nwr["leisure"="nature_reserve"]["name"]${aw};
+way["highway"~"^(footway|path|track)$"]["name"]["foot"!="no"]${aw};
+);out center tags 1500;`;
 }
 async function loadOSM(force){
   if(osmLoading){osmPending=true;return}const c=S.center,R=S.radius,key=c.lat.toFixed(2)+","+c.lng.toFixed(2);
-  const o=S.osm||{};if(!force&&o.key===key&&o.r>=Math.min(R,60)&&Date.now()-o.at<2*864e5)return;
+  const o=S.osm||{};if(!force&&o.v===3&&o.key===key&&o.r>=Math.min(R,60)&&Date.now()-o.at<2*864e5)return;
   osmLoading=true;let data=null;
   for(const url of OVERPASS){
     try{const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),30000);
@@ -927,14 +932,14 @@ async function loadOSM(force){
     const k=osmKind(t);if(!k||!isFinite(lat)||!isFinite(lng))return;
     if(!t.name){if(k!=="dog_park")return;t.name="Hundewiese "+(t["addr:street"]||t["addr:suburb"]||"in der Nähe")}
     const wkm=parseFloat(String(t.distance||"").replace(",","."));if(k==="walk"&&wkm>12)return; // nur kurze Runden
-    if(seen.has(t.name.toLowerCase()))return;
+    if(seen.has(t.name.toLowerCase()))return;seen.add(t.name.toLowerCase());
     const km=dist(c,{lat,lng}),web=t.website||t["contact:website"]||"";
     const score=(t.wikidata?3:0)+(web?1:0)+(t.opening_hours?1:0)+(t.wikipedia?1:0)-km/25;
     items.push({k,t,lat,lng,web,score,id:"osm-"+el.type+el.id})});
   // Pro Kategorie die besten nehmen, damit es abwechslungsreich bleibt
-  const cap={bar:12,pub:6,cafe:12,walk:10,dog_park:8,park:8},per={};const pick=[];
-  items.sort((a,b)=>b.score-a.score).forEach(i=>{per[i.k]=(per[i.k]||0)+1;if(per[i.k]<=(cap[i.k]||6))pick.push(i)});
-  const list=pick.slice(0,100).map(({k,t,lat,lng,web,id})=>{const C=OSM_CAT[k];
+  const cap={bar:30,pub:15,cafe:30,ice_cream:8,walk:20,path:15,dog_park:15,park:15,nature_reserve:10},per={};const pick=[];
+  items.sort((a,b)=>b.score-a.score).forEach(i=>{per[i.k]=(per[i.k]||0)+1;if(per[i.k]<=(cap[i.k]||10))pick.push(i)});
+  const list=pick.slice(0,250).map(({k,t,lat,lng,web,id})=>{const C=OSM_CAT[k];
     let oh=t.opening_hours?(" Geöffnet: "+t.opening_hours.replace(/;\s*/g,", ").slice(0,70)+"."):"";
     const vib=C.v.slice();
     if((k==="park"||k==="nature_reserve")&&t.dog!=="no"&&!vib.includes("dog"))vib.push("dog");
@@ -942,8 +947,8 @@ async function loadOSM(force){
     if(t.dog==="leashed")oh+=" Hunde an der Leine.";
     return {id,src:"osm",title:t.name.slice(0,60),place:t["addr:city"]||t["addr:suburb"]||t["addr:place"]||c.name,emoji:C.e,lat,lng,setting:C.s,vibes:vib.slice(0,3),duration:C.d,price:t.fee==="no"?"kostenlos":C.p,desc:C.t+oh,web}});
   // Alte OSM-Orte weit weg entfernen, neue hinzufügen
-  S.extra=S.extra.filter(a=>a.src!=="osm"||dist(c,a)<150).filter(a=>!list.some(n=>n.id===a.id)).concat(list).slice(-500);
-  S.osm={key,r:Math.min(R,60),at:Date.now()};save();ACTS=ACT();renderDeck();
+  S.extra=S.extra.filter(a=>a.src!=="osm"||dist(c,a)<150).filter(a=>!list.some(n=>n.id===a.id)).concat(list).slice(-900);
+  S.osm={v:3,key,r:Math.min(R,60),at:Date.now()};save();ACTS=ACT();renderDeck();
   if(list.length)toast(`📍 ${list.length} Orte rund um ${c.name} geladen`);
 }
 
