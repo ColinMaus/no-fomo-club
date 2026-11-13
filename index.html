@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#F3EEE5" id="themeMeta">
 <title>No FOMO Club</title>
 <meta name="apple-mobile-web-app-title" content="No FOMO">
@@ -26,13 +26,13 @@
 html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,sans-serif;overscroll-behavior:none}
 body{display:flex;justify-content:center}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
-.app{width:100%;max-width:480px;height:100dvh;display:flex;flex-direction:column;position:relative;overflow:hidden;padding-top:var(--st)}
+.app{width:100%;max-width:480px;height:100dvh;display:flex;flex-direction:column;position:relative;overflow:hidden;padding-top:max(var(--st),8px)}
 h1,h2,h3,.disp{font-family:"Bricolage Grotesque",sans-serif;letter-spacing:-.02em;margin:0}
 
 [data-theme=dark]{--bg:#12372A;--ink:#F4EEE2;--muted:#A3B5A9;--card:#1A4434;--line:rgba(244,238,226,.13);--inv:#12372A;--track:rgba(244,238,226,.28);--rfill:#F4EEE2;--soft:rgba(201,165,92,.10);--softb:#C9A55C;--msg:#1F5A3F;color-scheme:dark}
 html,body,.app,.tabs,.sheet{transition:background-color .3s,color .3s}
 /* header */
-.top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px 6px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:14px 16px 6px}
 .logo{display:flex;align-items:center;gap:9px}
 .logo svg{flex:0 0 auto;border-radius:8px}
 .lw{display:flex;flex-direction:column;line-height:1}
@@ -880,7 +880,7 @@ function initGL(){try{
   const el=document.createElement("div");el.className="gl";$("#mapbox").prepend(el);
   const map=new maplibregl.Map({container:el,style:"https://tiles.openfreemap.org/styles/positron",center:[S.center.lng,S.center.lat],zoom:8,attributionControl:{compact:true},interactive:false});
   let ok=false;const to=setTimeout(()=>{if(!ok){try{map.remove()}catch(e){}el.remove()}},9000);
-  map.on("load",()=>{ok=true;clearTimeout(to);GL=map;    styleGL();GLON=true;$("#mapbox").classList.add("glon");glFitKey="";renderMap()});
+  map.on("load",()=>{ok=true;clearTimeout(to);GL=map;    styleGL();GLON=true;$("#mapbox").classList.add("glon");glFitKey="";map.resize();renderMap();setTimeout(()=>{map.resize();glFitKey="";renderMap()},300)});
 }catch(e){}}
 function styleGL(){const m=GL,C=glColors(),st=m.getStyle();
   st.layers.forEach(l=>{const sl=l["source-layer"];if(l.id.startsWith("nf-"))return;try{
@@ -910,7 +910,10 @@ function circleRing(c,km,n=120){const out=[];for(let i=0;i<=n;i++){const a=i/n*2
 function updateGL(pins){
   const m=GL,c=S.center,R=S.radius;
   const outer=circleRing(c,R);
-  m.getSource("nf-mask").setData({type:"Feature",geometry:{type:"Polygon",coordinates:[[[-179,-85],[179,-85],[179,85],[-179,85],[-179,-85]],outer.slice().reverse()]}});
+  const area=r=>{let s=0;for(let i=0;i<r.length-1;i++)s+=(r[i+1][0]-r[i][0])*(r[i+1][1]+r[i][1]);return s};
+  const world=[[-179,-85],[179,-85],[179,85],[-179,85],[-179,-85]];
+  let hole=outer.slice();if(Math.sign(area(hole))===Math.sign(area(world)))hole.reverse(); // Loch muss andersherum laufen
+  m.getSource("nf-mask").setData({type:"Feature",geometry:{type:"Polygon",coordinates:[world,hole]}});
   m.getSource("nf-rings").setData({type:"FeatureCollection",features:[.25,.5,.75,1].map(p=>({type:"Feature",properties:{outer:p===1?1:0},geometry:{type:"LineString",coordinates:circleRing(c,R*p)}}))});
   glMarkers.forEach(x=>x.remove());glMarkers=[];
   const add=(el,ll,anchor="center")=>glMarkers.push(new maplibregl.Marker({element:el,anchor}).setLngLat(ll).addTo(m));
