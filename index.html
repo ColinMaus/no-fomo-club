@@ -435,6 +435,8 @@ a.btn{text-decoration:none;display:inline-block}
 // Leer = Vorschau-Modus mit simulierter Freigabe.
 const API_URL = "https://script.google.com/macros/s/AKfycbzvGipkqjj0C7hztrBK5sZRRDp5u0SRWU9e5Gh0E6q7X6wy4BMRHWZhSlqHszpm670tVw/exec";
 const LIVE = !!API_URL;
+// Schlüssel für Geoapify (kostenlos, schnelle Orte-Suche). Leer = langsamere OpenStreetMap-Server.
+const GEO_KEY = "6c14ce53883e47de8a9d18c4a9e9b308";
 
 /* ---------- iPhone-Home-Bildschirm: volle Höhe erzwingen ----------
    iOS meldet im Web-App-Modus manchmal eine zu kleine Höhe (als wäre unten noch
@@ -879,6 +881,7 @@ const OSM_CAT={
   dog_park:{e:"🐕",v:["dog","chill"],s:"out",d:"45 min",p:"kostenlos",t:"Hundewiese – hier darf dein Hund frei toben."},
   walk:{e:"🐾",v:["dog","nature","sport"],s:"out",d:"1–2 h",p:"kostenlos",t:"Rundweg in der Nähe – schöne Gassi-Runde."},
   path:{e:"🐕",v:["dog","nature","chill"],s:"out",d:"30–60 min",p:"kostenlos",t:"Benannter Spazierweg in der Nähe – kurze Gassi-Runde zwischendurch."},
+  picnic:{e:"🧺",v:["dog","chill","romantic"],s:"out",d:"1–2 h",p:"kostenlos",t:"Picknickplatz – Decke und Snacks mitnehmen."},
   ice_cream:{e:"🍦",v:["cafe","date"],s:"in",d:"30 min",p:"€",t:"Eiscafé – eine Kugel geht immer."}
 };
 function osmKind(t){
@@ -905,25 +908,50 @@ function osmStages(c,R){const b=km=>osmBox(c,Math.min(R,km));return[
   `nwr["leisure"~"^(dog_park|park)$"]${b(12)};relation["route"~"^(hiking|foot)$"]["name"]${b(12)};way["highway"~"^(footway|path)$"]["name"]${b(5)};`,
   `nwr["tourism"~"^(museum|gallery|zoo|theme_park|viewpoint|attraction)$"]["name"]${b(40)};nwr["historic"~"^(castle|ruins)$"]["name"]${b(40)};nwr["leisure"="nature_reserve"]["name"]${b(40)};`
 ]}
-async function osmFetch(body){
-  const q=`[out:json][timeout:25];(${body});out center tags 900;`;
-  for(const url of OVERPASS.slice()){
-    try{const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),30000);
-      const r=await fetch(url,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"},signal:ctl.signal});
-      clearTimeout(tm);if(!r.ok)continue;
-      const j=JSON.parse(await r.text());
-      if(Array.isArray(j.elements)&&!/error|timed out/i.test(j.remark||"")){
-        const i=OVERPASS.indexOf(url);if(i>0){OVERPASS.splice(i,1);OVERPASS.unshift(url)} // schnellen Server zuerst nehmen
-        return j.elements}
-    }catch(e){}
-  }
-  return null;
+async function osmFetch(body,ms=25000){
+  const q=`[out:json][timeout:20];(${body});out center tags 900;`;
+  const ctls=OVERPASS.map(()=>new AbortController());
+  const tm=setTimeout(()=>ctls.forEach(c=>c.abort()),ms);
+  try{
+    // Alle Server gleichzeitig fragen – die erste brauchbare Antwort gewinnt
+    const els=await Promise.any(OVERPASS.map((url,i)=>fetch(url,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"},signal:ctls[i].signal})
+      .then(r=>{if(!r.ok)throw 0;return r.text()}).then(tx=>{const j=JSON.parse(tx);if(!Array.isArray(j.elements)||/error|timed out/i.test(j.remark||""))throw 0;return j.elements})));
+    return els;
+  }catch(e){return null}finally{clearTimeout(tm);ctls.forEach(c=>c.abort())}
+}
+/* Geoapify: schnelle Orte-Suche (gleiche OpenStreetMap-Daten, aber eigener schneller Server) */
+const GEO_GROUPS=(R)=>[
+  {r:Math.min(R,20),n:150,named:1,c:"catering.cafe,catering.bar,catering.pub,catering.biergarten,catering.ice_cream"},
+  {r:Math.min(R,20),n:100,named:1,c:"entertainment.cinema,entertainment.culture.theatre,entertainment.escape_game,entertainment.bowling_alley,entertainment.miniature_golf,entertainment.activity_park.climbing,commercial.second_hand,commercial.marketplace,leisure.spa,entertainment.water_park"},
+  {r:Math.min(R,12),n:100,named:0,c:"pet.dog_park,leisure.park,leisure.picnic.picnic_site"},
+  {r:Math.min(R,40),n:120,named:1,c:"entertainment.museum,entertainment.zoo,entertainment.theme_park,tourism.attraction.viewpoint,tourism.sights.castle,tourism.sights.ruines,tourism.attraction,leisure.park.nature_reserve"}
+];
+function geoKind(cats){const has=k=>cats.some(x=>x===k||x.startsWith(k+"."));
+  if(has("tourism.attraction.artwork")||has("tourism.attraction.memorial")||has("memorial"))return null; // Statuen & Denkmäler weglassen
+  if(has("catering.ice_cream")||has("catering.cafe.ice_cream"))return"ice_cream";if(has("catering.cafe"))return"cafe";
+  if(has("catering.bar"))return"bar";if(has("catering.pub")||has("catering.biergarten"))return"pub";
+  if(has("entertainment.cinema"))return"cinema";if(has("entertainment.culture.theatre"))return"theatre";
+  if(has("entertainment.escape_game"))return"escape_game";if(has("entertainment.bowling_alley"))return"bowling_alley";
+  if(has("entertainment.miniature_golf"))return"miniature_golf";if(has("entertainment.activity_park.climbing"))return"climbing";
+  if(has("commercial.second_hand"))return"second_hand";if(has("commercial.marketplace"))return"marketplace";
+  if(has("leisure.spa")||has("entertainment.water_park"))return"bath";
+  if(has("pet.dog_park"))return"dog_park";if(has("leisure.picnic"))return"picnic";
+  if(has("leisure.park.nature_reserve"))return"nature_reserve";if(has("leisure.park"))return"park";
+  if(has("entertainment.museum"))return"museum";if(has("entertainment.zoo"))return"zoo";if(has("entertainment.theme_park"))return"theme_park";
+  if(has("tourism.attraction.viewpoint"))return"viewpoint";if(has("tourism.sights.castle"))return"castle";if(has("tourism.sights.ruines"))return"ruins";
+  if(has("tourism"))return"attraction";return null}
+async function geoFetch(c,g){
+  const u=`https://api.geoapify.com/v2/places?categories=${g.c}&filter=circle:${c.lng},${c.lat},${Math.round(g.r*1000)}&bias=proximity:${c.lng},${c.lat}&limit=${g.n}${g.named?"&conditions=named":""}&lang=de&apiKey=${GEO_KEY}`;
+  try{const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),15000);const r=await fetch(u,{signal:ctl.signal});clearTimeout(tm);if(!r.ok)return null;
+    const j=await r.json();return (j.features||[]).map(f=>{const p=f.properties||{},raw=(p.datasource&&p.datasource.raw)||{};
+      return {type:"geo",id:p.place_id||(p.lat+","+p.lon),lat:p.lat,lon:p.lon,kind:geoKind(p.categories||[]),tags:Object.assign({},raw,{name:p.name||raw.name,"addr:city":p.city||raw["addr:city"]})}})}
+  catch(e){return null}
 }
 function osmBuild(c,elements){
   const seen=new Set([...SEED,...S.extra.filter(a=>a.src!=="osm")].map(a=>a.title.toLowerCase()));
   const items=[];
   elements.forEach(el=>{const t=el.tags||{},lat=el.lat??(el.center&&el.center.lat),lng=el.lon??(el.center&&el.center.lon);
-    const k=osmKind(t);if(!k||!isFinite(lat)||!isFinite(lng))return;
+    const k=el.kind||osmKind(t);if(!k||!OSM_CAT[k]||!isFinite(lat)||!isFinite(lng))return;
     let name=t.name;if(!name){if(k!=="dog_park")return;name="Hundewiese "+(t["addr:street"]||t["addr:suburb"]||"in der Nähe")}
     const wkm=parseFloat(String(t.distance||"").replace(",","."));if(k==="walk"&&wkm>12)return; // nur kurze Runden
     if(seen.has(name.toLowerCase()))return;seen.add(name.toLowerCase());
@@ -943,24 +971,29 @@ function osmBuild(c,elements){
 let osmRun=0;
 async function loadOSM(force){
   const c=S.center,R=S.radius,key=c.lat.toFixed(2)+","+c.lng.toFixed(2);
-  const o=S.osm||{};if(!force&&o.v===5&&o.key===key&&o.r>=Math.min(R,40)&&Date.now()-o.at<2*864e5)return;
+  const o=S.osm||{};if(!force&&o.v===6&&o.key===key&&o.r>=Math.min(R,40)&&Date.now()-o.at<2*864e5)return;
   if(osmLoading&&osmLoading===key)return; // läuft schon für diesen Ort
   const run=++osmRun;osmLoading=key;
   const all=new Map();let ok=0,shown=0;
   toast("🔎 Suche Orte in der Nähe …");
-  for(const body of osmStages(c,R)){
-    const els=await osmFetch(body);
-    if(run!==osmRun)return; // inzwischen anderer Ort gewählt
-    if(!els)continue;ok++;
+  const merge=els=>{if(run!==osmRun||!els)return;ok++;
     els.forEach(el=>all.set(el.type+el.id,el));
     const list=osmBuild(c,[...all.values()]);
     S.extra=S.extra.filter(a=>a.src!=="osm"||(dist(c,a)<150&&!list.some(n=>n.id===a.id))).concat(list).slice(-900);
-    ACTS=ACT();softRenderDeck();
-    if(!shown&&list.length){shown=1;toast(`📍 ${list.length} Orte da – weitere werden geladen …`)}
+    ACTS=ACT();softRenderDeck();save();
+    if(!shown&&list.length){shown=1;toast(`📍 ${list.length} Orte da – weitere werden geladen …`)}};
+  if(GEO_KEY){
+    // Schnell: alle Gruppen gleichzeitig, jede erscheint sobald sie da ist
+    await Promise.all(GEO_GROUPS(R).map(g=>geoFetch(c,g).then(merge)));
+    // Rundwege gibt es dort nicht – die kommen still über OpenStreetMap dazu
+    osmFetch(`relation["route"~"^(hiking|foot)$"]["name"]${osmBox(c,Math.min(R,12))};`,40000).then(merge);
+  }else{
+    for(const body of osmStages(c,R)){merge(await osmFetch(body));if(run!==osmRun)return}
   }
+  if(run!==osmRun)return;
   osmLoading=false;
   if(!ok){toast("Orte konnten gerade nicht geladen werden – versuch es später nochmal");return}
-  S.osm={v:5,key,r:Math.min(R,40),at:Date.now()};save();
+  S.osm={v:6,key,r:Math.min(R,40),at:Date.now()};save();
   const n=S.extra.filter(a=>a.src==="osm"&&dist(c,a)<=Math.max(R,40)).length;
   toast(`📍 ${n} Orte rund um ${c.name} geladen`);
 }
