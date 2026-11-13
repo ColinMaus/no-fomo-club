@@ -847,7 +847,7 @@ Antworte NUR mit JSON in genau dieser Form:
 /* ---------- Orte automatisch laden: OpenStreetMap (Overpass) ----------
    Weltweit, kostenlos, ohne Schlüssel. Lädt beim Öffnen und bei Ortswechsel
    Bars, Cafés, Museen, Aussichtspunkte usw. im Umkreis. Daten © OpenStreetMap-Mitwirkende. */
-const OVERPASS=["https://overpass-api.de/api/interpreter","https://overpass.private.coffee/api/interpreter"];
+const OVERPASS=["https://maps.mail.ru/osm/tools/overpass/api/interpreter","https://overpass-api.de/api/interpreter","https://overpass.private.coffee/api/interpreter"];
 let osmLoading=false,osmPending=false;
 const OSM_CAT={
   bar:{e:"🍸",v:["bar","date"],s:"in",d:"Abend",p:"€€",t:"Bar für einen entspannten Abend."},
@@ -879,7 +879,7 @@ const OSM_CAT={
   ice_cream:{e:"🍦",v:["cafe","date"],s:"in",d:"30 min",p:"€",t:"Eiscafé – eine Kugel geht immer."}
 };
 function osmKind(t){
-  if(t.amenity==="bar")return"bar";if(t.amenity==="pub")return"pub";if(t.amenity==="cafe")return"cafe";if(t.amenity==="ice_cream")return"ice_cream";
+  if(t.amenity==="bar")return"bar";if(t.amenity==="pub"||t.amenity==="biergarten")return"pub";if(t.amenity==="cafe")return"cafe";if(t.amenity==="ice_cream")return"ice_cream";
   if(t.shop==="second_hand"||t.shop==="vintage")return"second_hand";
   if(t.amenity==="cinema")return"cinema";if(t.amenity==="theatre")return"theatre";if(t.amenity==="marketplace")return"marketplace";
   if(t.amenity==="public_bath"||t.leisure==="water_park"||t.leisure==="sauna")return"bath";
@@ -889,43 +889,46 @@ function osmKind(t){
   if(t.tourism==="museum")return"museum";if(t.tourism==="gallery")return"gallery";if(t.tourism==="zoo")return"zoo";
   if(t.tourism==="theme_park")return"theme_park";if(t.tourism==="viewpoint")return"viewpoint";
   if(t.historic==="castle")return"castle";if(t.historic==="ruins")return"ruins";
-  if(t.leisure==="dog_park")return"dog_park";if(t.route==="hiking")return"walk";if(t.highway&&/^(footway|path|track)$/.test(t.highway))return"path";
+  if(t.leisure==="dog_park")return"dog_park";if(t.route==="hiking"||t.route==="foot")return"walk";if(t.highway&&/^(footway|path|track)$/.test(t.highway))return"path";
   if(t.leisure==="park")return"park";if(t.leisure==="nature_reserve")return"nature_reserve";
   if(t.tourism==="attraction"||t.historic==="monument")return"attraction";
   return null;
 }
+function osmBox(c,km){const dl=km/110.57,dg=km/(111.32*Math.cos(c.lat*Math.PI/180));return `(${(c.lat-dl).toFixed(4)},${(c.lng-dg).toFixed(4)},${(c.lat+dl).toFixed(4)},${(c.lng+dg).toFixed(4)})`}
 function osmQuery(c,R){
-  const r1=Math.round(Math.min(R,25)*1000),r2=Math.round(Math.min(R,60)*1000),aw=`(around:${Math.round(Math.min(R,20)*1000)},${c.lat},${c.lng})`,a1=`(around:${r1},${c.lat},${c.lng})`,a2=`(around:${r2},${c.lat},${c.lng})`;
-  return `[out:json][timeout:25];(
-nwr["amenity"~"^(bar|pub|cafe|ice_cream)$"]["name"]${a1};
-nwr["shop"~"^(second_hand|vintage)$"]["name"]${a1};
-nwr["amenity"~"^(cinema|theatre|marketplace|public_bath)$"]["name"]${a1};
-nwr["leisure"~"^(escape_game|bowling_alley|miniature_golf|ice_rink|water_park|sauna)$"]["name"]${a1};
-nwr["sport"="climbing"]["name"]${a1};
-nwr["tourism"~"^(museum|gallery|zoo|theme_park|viewpoint)$"]["name"]${a2};
-nwr["tourism"="attraction"]["name"]["wikidata"]${a2};
-nwr["historic"~"^(castle|ruins|monument)$"]["name"]["wikidata"]${a2};
-nwr["leisure"~"^(park|nature_reserve)$"]["name"]["wikidata"]${a2};
-nwr["leisure"="dog_park"]${a1};
-nwr["leisure"="park"]["name"]${aw};
-relation["route"="hiking"]["name"]${aw};
-nwr["leisure"="nature_reserve"]["name"]${aw};
-way["highway"~"^(footway|path|track)$"]["name"]["foot"!="no"]${aw};
+  // Rechteck-Abfragen statt Kreis-Abfragen: deutlich schneller auf den Overpass-Servern
+  const b1=osmBox(c,Math.min(R,20)),b2=osmBox(c,Math.min(R,40)),b3=osmBox(c,Math.min(R,12)),b4=osmBox(c,Math.min(R,5));
+  return `[out:json][timeout:40];(
+nwr["amenity"~"^(bar|pub|cafe|biergarten|ice_cream|cinema|theatre|marketplace|public_bath)$"]["name"]${b1};
+nwr["shop"~"^(second_hand|vintage)$"]["name"]${b1};
+nwr["leisure"~"^(escape_game|bowling_alley|miniature_golf|ice_rink|water_park|sauna)$"]["name"]${b1};
+nwr["sport"="climbing"]["name"]${b1};
+nwr["tourism"~"^(museum|gallery|zoo|theme_park|viewpoint|attraction)$"]["name"]${b2};
+nwr["historic"~"^(castle|ruins)$"]["name"]${b2};
+nwr["leisure"="nature_reserve"]["name"]${b2};
+nwr["leisure"~"^(dog_park|park)$"]${b3};
+relation["route"~"^(hiking|foot)$"]["name"]${b3};
+way["highway"~"^(footway|path)$"]["name"]${b4};
 );out center tags 1500;`;
 }
 async function loadOSM(force){
   if(osmLoading){osmPending=true;return}const c=S.center,R=S.radius,key=c.lat.toFixed(2)+","+c.lng.toFixed(2);
-  const o=S.osm||{};if(!force&&o.v===3&&o.key===key&&o.r>=Math.min(R,60)&&Date.now()-o.at<2*864e5)return;
+  const o=S.osm||{};if(!force&&o.v===4&&o.key===key&&o.r>=Math.min(R,60)&&Date.now()-o.at<2*864e5)return;
   osmLoading=true;let data=null;
+  if(force||!S.extra.some(a=>a.src==="osm"&&dist(c,a)<R))toast("🔎 Suche Orte in der Nähe …");
+  const q=osmQuery(c,R);
   for(const url of OVERPASS){
-    try{const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),30000);
-      const r=await fetch(url,{method:"POST",body:"data="+encodeURIComponent(osmQuery(c,R)),headers:{"Content-Type":"application/x-www-form-urlencoded"},signal:ctl.signal});
-      clearTimeout(tm);if(r.ok){data=await r.json();break}}catch(e){}
+    try{const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),45000);
+      const r=await fetch(url,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"},signal:ctl.signal});
+      clearTimeout(tm);if(!r.ok)continue;
+      const j=JSON.parse(await r.text());
+      if(Array.isArray(j.elements)&&j.elements.length&&!/error|timed out/i.test(j.remark||"")){data=j;break}
+    }catch(e){}
   }
   osmLoading=false;
   if(osmPending){osmPending=false;setTimeout(()=>loadOSM(),50)} // Standort hat sich währenddessen geändert
   if(S.center!==c)return;
-  if(!data||!Array.isArray(data.elements)){if(force)toast("Orte konnten gerade nicht geladen werden");return}
+  if(!data){toast("Orte konnten gerade nicht geladen werden – versuch es später nochmal");return}
   const seen=new Set([...ACTS.values()].map(a=>a.title.toLowerCase()));
   const items=[];
   data.elements.forEach(el=>{const t=el.tags||{},lat=el.lat??(el.center&&el.center.lat),lng=el.lon??(el.center&&el.center.lon);
@@ -948,7 +951,7 @@ async function loadOSM(force){
     return {id,src:"osm",title:t.name.slice(0,60),place:t["addr:city"]||t["addr:suburb"]||t["addr:place"]||c.name,emoji:C.e,lat,lng,setting:C.s,vibes:vib.slice(0,3),duration:C.d,price:t.fee==="no"?"kostenlos":C.p,desc:C.t+oh,web}});
   // Alte OSM-Orte weit weg entfernen, neue hinzufügen
   S.extra=S.extra.filter(a=>a.src!=="osm"||dist(c,a)<150).filter(a=>!list.some(n=>n.id===a.id)).concat(list).slice(-900);
-  S.osm={v:3,key,r:Math.min(R,60),at:Date.now()};save();ACTS=ACT();renderDeck();
+  S.osm={v:4,key,r:Math.min(R,60),at:Date.now()};save();ACTS=ACT();renderDeck();
   if(list.length)toast(`📍 ${list.length} Orte rund um ${c.name} geladen`);
 }
 
