@@ -732,6 +732,7 @@ function deckList(){
     if(a.months&&!a.months.includes(m))return false;
     return true;
   }).sort((a,b)=>{
+    if(topLock){if(a.id===topLock)return -1;if(b.id===topLock)return 1}
     if(rainy&&S.setting==="any"&&a.setting!==b.setting)return a.setting==="in"?-1:1;
     return hash(a.id+S.day)-hash(b.id+S.day);
   });
@@ -751,13 +752,15 @@ function cardHTML(a,cls){
       <p>${esc(a.desc||"")}</p>
     </div></div>`;
 }
+let swiping=false,deckDirty=false,topLock=null;
+function softRenderDeck(){if(swiping){deckDirty=true;return}const c=topCard();topLock=c?c.dataset.id:null;renderDeck();topLock=null}
 function renderDeck(){
   const el=$("#deck");
   if(loadingIdeas){el.innerHTML=`<div class="loading"><div style="font-size:44px">🔭</div>Claude sucht Ideen<br>rund um ${esc(S.center.name)}…</div>`;return}
   const list=deckList();
   if(!list.length){
     el.innerHTML=`<div class="empty"><div class="big">🫶</div><h3>Alles durchgeswiped</h3>
-      <p>${osmLoading?"Suche gerade Orte in der Nähe …":sample?"Hol dir frische Ideen, passend zu deinem Tag und deinen Filtern.":"Lade Orte in der Nähe nach, lockere die Filter oder wähle einen anderen Tag."}</p>
+      <p>${osmLoading?"Suche gerade Orte in der Nähe – gleich geht es weiter …":sample?"Hol dir frische Ideen, passend zu deinem Tag und deinen Filtern.":"Lade Orte in der Nähe nach, lockere die Filter oder wähle einen anderen Tag."}</p>
       <div class="row" style="justify-content:center">${sample?`<button class="btn coral" id="moreBtn">✨ Neue Ideen holen</button>`:`<button class="btn coral" id="osmBtn">📍 Orte in der Nähe laden</button>`}
       <button class="btn ghost" id="resetF">Filter zurücksetzen</button></div></div>`;
     $("#resetF").onclick=()=>{S.vibes=[];S.setting="any";S.radius=20;save();renderFilters();renderDeck()};
@@ -776,12 +779,12 @@ function bindTop(){
   const c=topCard();if(!c)return;
   let sx=0,sy=0,dx=0,dy=0,down=false,t0=0;
   const yes=c.querySelector(".yes"),no=c.querySelector(".no"),sup=c.querySelector(".sup");
-  c.onpointerdown=e=>{down=true;sx=e.clientX;sy=e.clientY;dx=dy=0;t0=Date.now();c.style.transition="none";c.setPointerCapture(e.pointerId)};
+  c.onpointerdown=e=>{down=true;swiping=true;sx=e.clientX;sy=e.clientY;dx=dy=0;t0=Date.now();c.style.transition="none";c.setPointerCapture(e.pointerId)};
   c.onpointermove=e=>{if(!down)return;dx=e.clientX-sx;dy=e.clientY-sy;
     c.style.transform=`translate(${dx}px,${dy}px) rotate(${dx/16}deg)`;
     yes.style.opacity=Math.max(0,Math.min(1,dx/90));no.style.opacity=Math.max(0,Math.min(1,-dx/90));
     sup.style.opacity=Math.abs(dx)<60?Math.max(0,Math.min(1,-dy/110)):0};
-  c.onpointerup=c.onpointercancel=()=>{if(!down)return;down=false;c.style.transition="";
+  c.onpointerup=c.onpointercancel=()=>{if(!down)return;down=false;swiping=false;c.style.transition="";if(deckDirty)setTimeout(()=>{deckDirty=false;softRenderDeck()},450);
     const v=Math.abs(dx)/Math.max(1,Date.now()-t0);
     if(dx>110||(dx>40&&v>.6))fly(c,"like");
     else if(dx<-110||(dx<-40&&v>.6))fly(c,"nope");
@@ -848,7 +851,7 @@ Antworte NUR mit JSON in genau dieser Form:
    Weltweit, kostenlos, ohne Schlüssel. Lädt beim Öffnen und bei Ortswechsel
    Bars, Cafés, Museen, Aussichtspunkte usw. im Umkreis. Daten © OpenStreetMap-Mitwirkende. */
 const OVERPASS=["https://maps.mail.ru/osm/tools/overpass/api/interpreter","https://overpass-api.de/api/interpreter","https://overpass.private.coffee/api/interpreter"];
-let osmLoading=false,osmPending=false;
+let osmLoading=false;
 const OSM_CAT={
   bar:{e:"🍸",v:["bar","date"],s:"in",d:"Abend",p:"€€",t:"Bar für einen entspannten Abend."},
   pub:{e:"🍺",v:["bar","chill"],s:"in",d:"Abend",p:"€",t:"Kneipe mit lockerer Stimmung."},
@@ -895,66 +898,72 @@ function osmKind(t){
   return null;
 }
 function osmBox(c,km){const dl=km/110.57,dg=km/(111.32*Math.cos(c.lat*Math.PI/180));return `(${(c.lat-dl).toFixed(4)},${(c.lng-dg).toFixed(4)},${(c.lat+dl).toFixed(4)},${(c.lng+dg).toFixed(4)})`}
-function osmQuery(c,R){
-  // Rechteck-Abfragen statt Kreis-Abfragen: deutlich schneller auf den Overpass-Servern
-  const b1=osmBox(c,Math.min(R,20)),b2=osmBox(c,Math.min(R,40)),b3=osmBox(c,Math.min(R,12)),b4=osmBox(c,Math.min(R,5));
-  return `[out:json][timeout:40];(
-nwr["amenity"~"^(bar|pub|cafe|biergarten|ice_cream|cinema|theatre|marketplace|public_bath)$"]["name"]${b1};
-nwr["shop"~"^(second_hand|vintage)$"]["name"]${b1};
-nwr["leisure"~"^(escape_game|bowling_alley|miniature_golf|ice_rink|water_park|sauna)$"]["name"]${b1};
-nwr["sport"="climbing"]["name"]${b1};
-nwr["tourism"~"^(museum|gallery|zoo|theme_park|viewpoint|attraction)$"]["name"]${b2};
-nwr["historic"~"^(castle|ruins)$"]["name"]${b2};
-nwr["leisure"="nature_reserve"]["name"]${b2};
-nwr["leisure"~"^(dog_park|park)$"]${b3};
-relation["route"~"^(hiking|foot)$"]["name"]${b3};
-way["highway"~"^(footway|path)$"]["name"]${b4};
-);out center tags 1500;`;
-}
-async function loadOSM(force){
-  if(osmLoading){osmPending=true;return}const c=S.center,R=S.radius,key=c.lat.toFixed(2)+","+c.lng.toFixed(2);
-  const o=S.osm||{};if(!force&&o.v===4&&o.key===key&&o.r>=Math.min(R,60)&&Date.now()-o.at<2*864e5)return;
-  osmLoading=true;let data=null;
-  if(force||!S.extra.some(a=>a.src==="osm"&&dist(c,a)<R))toast("🔎 Suche Orte in der Nähe …");
-  const q=osmQuery(c,R);
-  for(const url of OVERPASS){
-    try{const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),45000);
+// Nach und nach laden: erst Cafés & Bars ganz in der Nähe (schnell), dann der Rest im Hintergrund
+function osmStages(c,R){const b=km=>osmBox(c,Math.min(R,km));return[
+  `nwr["amenity"~"^(bar|pub|cafe|biergarten|ice_cream)$"]["name"]${b(4)};`,
+  `nwr["amenity"~"^(bar|pub|cafe|biergarten|ice_cream|cinema|theatre|marketplace|public_bath)$"]["name"]${b(20)};nwr["shop"~"^(second_hand|vintage)$"]["name"]${b(20)};nwr["leisure"~"^(escape_game|bowling_alley|miniature_golf|ice_rink|water_park|sauna)$"]["name"]${b(20)};nwr["sport"="climbing"]["name"]${b(20)};`,
+  `nwr["leisure"~"^(dog_park|park)$"]${b(12)};relation["route"~"^(hiking|foot)$"]["name"]${b(12)};way["highway"~"^(footway|path)$"]["name"]${b(5)};`,
+  `nwr["tourism"~"^(museum|gallery|zoo|theme_park|viewpoint|attraction)$"]["name"]${b(40)};nwr["historic"~"^(castle|ruins)$"]["name"]${b(40)};nwr["leisure"="nature_reserve"]["name"]${b(40)};`
+]}
+async function osmFetch(body){
+  const q=`[out:json][timeout:25];(${body});out center tags 900;`;
+  for(const url of OVERPASS.slice()){
+    try{const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),30000);
       const r=await fetch(url,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"},signal:ctl.signal});
       clearTimeout(tm);if(!r.ok)continue;
       const j=JSON.parse(await r.text());
-      if(Array.isArray(j.elements)&&j.elements.length&&!/error|timed out/i.test(j.remark||"")){data=j;break}
+      if(Array.isArray(j.elements)&&!/error|timed out/i.test(j.remark||"")){
+        const i=OVERPASS.indexOf(url);if(i>0){OVERPASS.splice(i,1);OVERPASS.unshift(url)} // schnellen Server zuerst nehmen
+        return j.elements}
     }catch(e){}
   }
-  osmLoading=false;
-  if(osmPending){osmPending=false;setTimeout(()=>loadOSM(),50)} // Standort hat sich währenddessen geändert
-  if(S.center!==c)return;
-  if(!data){toast("Orte konnten gerade nicht geladen werden – versuch es später nochmal");return}
-  const seen=new Set([...ACTS.values()].map(a=>a.title.toLowerCase()));
+  return null;
+}
+function osmBuild(c,elements){
+  const seen=new Set([...SEED,...S.extra.filter(a=>a.src!=="osm")].map(a=>a.title.toLowerCase()));
   const items=[];
-  data.elements.forEach(el=>{const t=el.tags||{},lat=el.lat??(el.center&&el.center.lat),lng=el.lon??(el.center&&el.center.lon);
+  elements.forEach(el=>{const t=el.tags||{},lat=el.lat??(el.center&&el.center.lat),lng=el.lon??(el.center&&el.center.lon);
     const k=osmKind(t);if(!k||!isFinite(lat)||!isFinite(lng))return;
-    if(!t.name){if(k!=="dog_park")return;t.name="Hundewiese "+(t["addr:street"]||t["addr:suburb"]||"in der Nähe")}
+    let name=t.name;if(!name){if(k!=="dog_park")return;name="Hundewiese "+(t["addr:street"]||t["addr:suburb"]||"in der Nähe")}
     const wkm=parseFloat(String(t.distance||"").replace(",","."));if(k==="walk"&&wkm>12)return; // nur kurze Runden
-    if(seen.has(t.name.toLowerCase()))return;seen.add(t.name.toLowerCase());
+    if(seen.has(name.toLowerCase()))return;seen.add(name.toLowerCase());
     const km=dist(c,{lat,lng}),web=t.website||t["contact:website"]||"";
     const score=(t.wikidata?3:0)+(web?1:0)+(t.opening_hours?1:0)+(t.wikipedia?1:0)-km/25;
-    items.push({k,t,lat,lng,web,score,id:"osm-"+el.type+el.id})});
-  // Pro Kategorie die besten nehmen, damit es abwechslungsreich bleibt
+    items.push({k,t,name,lat,lng,web,score,id:"osm-"+el.type+el.id})});
   const cap={bar:30,pub:15,cafe:30,ice_cream:8,walk:20,path:15,dog_park:15,park:15,nature_reserve:10},per={};const pick=[];
   items.sort((a,b)=>b.score-a.score).forEach(i=>{per[i.k]=(per[i.k]||0)+1;if(per[i.k]<=(cap[i.k]||10))pick.push(i)});
-  const list=pick.slice(0,250).map(({k,t,lat,lng,web,id})=>{const C=OSM_CAT[k];
+  return pick.slice(0,250).map(({k,t,name,lat,lng,web,id})=>{const C=OSM_CAT[k];
     let oh=t.opening_hours?(" Geöffnet: "+t.opening_hours.replace(/;\s*/g,", ").slice(0,70)+"."):"";
     const vib=C.v.slice();
     if((k==="park"||k==="nature_reserve")&&t.dog!=="no"&&!vib.includes("dog"))vib.push("dog");
     if(k==="walk"){const d=parseFloat(String(t.distance||"").replace(",","."));if(d)oh=` Etwa ${d.toString().replace(".",",")} km lang.`}
     if(t.dog==="leashed")oh+=" Hunde an der Leine.";
-    return {id,src:"osm",title:t.name.slice(0,60),place:t["addr:city"]||t["addr:suburb"]||t["addr:place"]||c.name,emoji:C.e,lat,lng,setting:C.s,vibes:vib.slice(0,3),duration:C.d,price:t.fee==="no"?"kostenlos":C.p,desc:C.t+oh,web}});
-  // Alte OSM-Orte weit weg entfernen, neue hinzufügen
-  S.extra=S.extra.filter(a=>a.src!=="osm"||dist(c,a)<150).filter(a=>!list.some(n=>n.id===a.id)).concat(list).slice(-900);
-  S.osm={v:4,key,r:Math.min(R,60),at:Date.now()};save();ACTS=ACT();renderDeck();
-  if(list.length)toast(`📍 ${list.length} Orte rund um ${c.name} geladen`);
+    return {id,src:"osm",title:name.slice(0,60),place:t["addr:city"]||t["addr:suburb"]||t["addr:place"]||c.name,emoji:C.e,lat,lng,setting:C.s,vibes:vib.slice(0,3),duration:C.d,price:t.fee==="no"?"kostenlos":C.p,desc:C.t+oh,web}});
 }
-
+let osmRun=0;
+async function loadOSM(force){
+  const c=S.center,R=S.radius,key=c.lat.toFixed(2)+","+c.lng.toFixed(2);
+  const o=S.osm||{};if(!force&&o.v===5&&o.key===key&&o.r>=Math.min(R,40)&&Date.now()-o.at<2*864e5)return;
+  if(osmLoading&&osmLoading===key)return; // läuft schon für diesen Ort
+  const run=++osmRun;osmLoading=key;
+  const all=new Map();let ok=0,shown=0;
+  toast("🔎 Suche Orte in der Nähe …");
+  for(const body of osmStages(c,R)){
+    const els=await osmFetch(body);
+    if(run!==osmRun)return; // inzwischen anderer Ort gewählt
+    if(!els)continue;ok++;
+    els.forEach(el=>all.set(el.type+el.id,el));
+    const list=osmBuild(c,[...all.values()]);
+    S.extra=S.extra.filter(a=>a.src!=="osm"||(dist(c,a)<150&&!list.some(n=>n.id===a.id))).concat(list).slice(-900);
+    ACTS=ACT();softRenderDeck();
+    if(!shown&&list.length){shown=1;toast(`📍 ${list.length} Orte da – weitere werden geladen …`)}
+  }
+  osmLoading=false;
+  if(!ok){toast("Orte konnten gerade nicht geladen werden – versuch es später nochmal");return}
+  S.osm={v:5,key,r:Math.min(R,40),at:Date.now()};save();
+  const n=S.extra.filter(a=>a.src==="osm"&&dist(c,a)<=Math.max(R,40)).length;
+  toast(`📍 ${n} Orte rund um ${c.name} geladen`);
+}
 /* ---------- Standort ---------- */
 const mapKey = c=>c.lat.toFixed(1)+","+c.lng.toFixed(1);
 function setCenter(c){S.center=c;save();$("#locName").textContent=c.name;loadWeather();renderDeck();renderMap();loadOSM()}
